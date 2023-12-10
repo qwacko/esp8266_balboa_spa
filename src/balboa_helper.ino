@@ -44,7 +44,10 @@ void rs485_send() {
   if (AUTO_TX) {
 
   } else {
-    digitalWrite(TX485, HIGH);
+    pinMode(TX485_Rx, OUTPUT);
+    digitalWrite(TX485_Rx, LOW);
+    pinMode(TX485_Tx, OUTPUT);
+    digitalWrite(TX485_Tx, HIGH);
     delay(1);
   }
 
@@ -69,7 +72,8 @@ void rs485_send() {
   if (AUTO_TX) {
 
   } else {
-    digitalWrite(TX485, LOW);
+    digitalWrite(TX485_Rx, LOW);
+    digitalWrite(TX485_Tx, LOW);
   }
 
   // DEBUG: print_msg(Q_out);
