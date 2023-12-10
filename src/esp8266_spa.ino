@@ -18,7 +18,7 @@
 // GND  BLACK
 // A    YELLOW
 // B    WHITE
-#include <LittleFS.h>
+// #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <Ticker.h>
 #include <config.h>
@@ -34,7 +34,7 @@
 #define RLY1 D7
 #define RLY2 D8
 #define loopcountmax 10000
-#define pubsub_refresh_ms 100000 // 100 Seconds
+#define pubsub_refresh_ms 10000 // 10 Seconds
 
 #include <ESP8266WiFi.h>
 #include <CircularBuffer.h>
@@ -42,7 +42,7 @@ CircularBuffer<uint8_t, 35> Q_in;
 CircularBuffer<uint8_t, 35> Q_out;
 
 #include <ESP8266WebServer.h> // Local WebServer used to serve the configuration portal
-#include <ESP8266mDNS.h>
+// #include <ESP8266mDNS.h>
 #include <ESP8266HTTPUpdateServer.h>
 #include <ArduinoOTA.h>
 ESP8266WebServer httpServer(80);
@@ -142,7 +142,6 @@ void print_msg(CircularBuffer<uint8_t, 35> &data)
     s += String(x, HEX);
     s += " ";
   }
-  mqtt.publish("Spa/node/msg", s.c_str());
   _yield();
 }
 
@@ -237,7 +236,7 @@ Ticker faultlogTimer(resetFaultLog, 300000); // 5 minutes
 
 void decodeSettings()
 {
-  mqtt.publish("Spa/config/status", "Got config");
+  mqtt.publish("Spa/debug/message", "Got config");
   SpaConfig.pump1 = Q_in[5] & 0x03;
   SpaConfig.pump2 = (Q_in[5] & 0x0C) >> 2;
   SpaConfig.pump3 = (Q_in[5] & 0x30) >> 4;
@@ -434,16 +433,9 @@ void hardreset()
 void mqttpubsub()
 {
 
-  // ONLY DO THE FOLLOWING IF have_config == true otherwise it will not work
-  String Payload;
+  mqtt.publish("Spa/debug/message", "mqttpubsub refreshed");
 
-  mqtt.publish("Spa/node/state", "ON");
-  mqtt.publish("Spa/node/debug", "RECONNECT");
-  // mqtt.publish("Spa/node/debug", String(millis()).c_str());
-  // mqtt.publish("Spa/node/debug", String(oldstate).c_str());
-    mqtt.publish("Spa/node/flashsize", String(ESP.getFlashChipRealSize()).c_str());
-  mqtt.publish("Spa/node/chipid", String(ESP.getChipId()).c_str());
-  mqtt.publish("Spa/node/speed", String(ESP.getCpuFreqMHz()).c_str());
+  String Payload;
 
   // ... and resubscribe
 
@@ -453,7 +445,7 @@ void mqttpubsub()
   mqtt.unsubscribe("Spa/heatingmode/set");
   mqtt.unsubscribe("Spa/heat_mode/set");
   mqtt.unsubscribe("Spa/highrange/set");
-  mqtt.unsubscribe("Spa/ping");
+  mqtt.unsubscribe("Spa/heartbeat/ping");
   mqtt.unsubscribe("Spa/jet_1/set");
   mqtt.unsubscribe("Spa/jet_2/set");
   mqtt.unsubscribe("Spa/blower/set");
@@ -466,29 +458,11 @@ void mqttpubsub()
   mqtt.subscribe("Spa/heatingmode/set");
   mqtt.subscribe("Spa/heat_mode/set");
   mqtt.subscribe("Spa/highrange/set");
-  mqtt.subscribe("Spa/ping");
-
-  if (have_config == 2)
-  {
-    // OPTIONAL ELEMENTS
-    if (SpaConfig.pump1 != 0)
-    {
-      mqtt.subscribe("Spa/jet_1/set");
-    }
-    if (SpaConfig.pump2 != 0)
-    {
-      mqtt.subscribe("Spa/jet_2/set");
-    }
-    if (SpaConfig.blower)
-    {
-      mqtt.subscribe("Spa/blower/set");
-    }
-    if (SpaConfig.light1)
-    {
-      mqtt.subscribe("Spa/light/set");
-    }
-  }
-
+  mqtt.subscribe("Spa/heartbeat/ping");
+  mqtt.subscribe("Spa/jet_1/set");
+  mqtt.subscribe("Spa/jet_2/set");
+  mqtt.subscribe("Spa/blower/set");
+  mqtt.subscribe("Spa/light/set");
   mqtt.subscribe("Spa/relay_1/set");
   mqtt.subscribe("Spa/relay_2/set");
 
@@ -504,7 +478,7 @@ Ticker pubsubTimer(mqttpubsub, pubsub_refresh_ms);
 void reconnect()
 {
 
-  mqtt.disconnect();
+  // mqtt.disconnect();
 
   if (!mqtt.connected())
   {
@@ -520,10 +494,10 @@ void reconnect()
       mqtt.connect("Spa1", BROKER_LOGIN.c_str(), BROKER_PASS.c_str());
     }
 
-    if (have_config == 3)
-    {
-      have_config = 2; // we have disconnected, let's republish our configuration
-    }
+    // if (have_config == 3)
+    // {
+    //   have_config = 2; // we have disconnected, let's republish our configuration
+    // }
   }
   mqtt.setBufferSize(1024); // increase pubsubclient buffer size
 }
@@ -535,7 +509,7 @@ unsigned long lastMQTTPing = millis();
 
 void ping()
 {
-  mqtt.publish("Spa/ping", "ping");
+  mqtt.publish("Spa/heartbeat/ping", "ping");
 }
 
 Ticker pingTimer(ping, 1000);
@@ -586,7 +560,7 @@ void monitorStatus()
   }
 
   // If MQTT isn't connected or we haven't received a ping in 10 seconds, then restart mqtt
-  if (!mqtt.connected() || timeSinceLastMQTTPing > 10000)
+  if (!mqtt.connected() || timeSinceLastMQTTPing > 100000)
   {
     mqtt.publish("Spa/debug/error", "MQTT Disconnected");
     reconnect();
@@ -600,7 +574,7 @@ void monitorStatus()
   }
 
   // If no commands are received, or MQTT Ping isn't working then restart
-  if (timeSinceLastCommandRequest > 100000 || timeSinceLastMQTTPing > 100000)
+  if (timeSinceLastCommandRequest > 1000000 || timeSinceLastMQTTPing > 1000000)
   {
     mqtt.publish("Spa/debug/error", "No Commands Received");
     ESP.restart();
@@ -609,6 +583,7 @@ void monitorStatus()
 
   loopCount = 0;
   loopTimer = millis();
+  last_state_crc = 0x00;
 }
 
 Ticker statusMonitor(monitorStatus, 1000);
@@ -627,6 +602,8 @@ Ticker commsUpdateTimer(sendCommsConfiguration, 1000);
 // function called when a MQTT message arrived
 void callback(char *p_topic, byte *p_payload, unsigned int p_length)
 {
+
+
   // concat the payload into a string
   String payload;
   for (uint8_t i = 0; i < p_length; i++)
@@ -635,14 +612,20 @@ void callback(char *p_topic, byte *p_payload, unsigned int p_length)
   }
   String topic = String(p_topic);
 
+  // mqtt.publish("Spa/debug/debug", "MQTT Command Received");
+  // mqtt.publish("Spa/debug/debug", topic.c_str());
+  // mqtt.publish("Spa/debug/debug", payload.c_str());
+  // mqtt.publish("Spa/debug/debug", "Procesing Follows...");
+
+
   _yield();
 
   // handle message topic
-  if (topic.equals("Spa/ping"))
+  if (topic.equals("Spa/heartbeat/ping"))
   {
+    // mqtt.publish("Spa/heartbeat/pong", "pong");
     lastMQTTPing = millis();
   }
-
   else if (topic.startsWith("Spa/relay_"))
   {
     bool newstate = 0;
@@ -688,6 +671,7 @@ void callback(char *p_topic, byte *p_payload, unsigned int p_length)
   }
   else if (topic.equals("Spa/light/set"))
   {
+    
     if (payload.equals("ON") && SpaState.light == 0)
       send = 0x11;
     else if (payload.equals("OFF") && SpaState.light == 1)
@@ -736,74 +720,8 @@ void callback(char *p_topic, byte *p_payload, unsigned int p_length)
 
 void setup()
 {
-  DynamicJsonDocument jsonSettings(1024);
 
   String error_msg = "";
-
-  if (LittleFS.begin())
-  {
-
-    if (SAVE_CONN == true)
-    {
-      File f = LittleFS.open("/ip.txt", "w");
-      if (!f)
-      {
-        error_msg = "failed to create file";
-      }
-
-      jsonSettings["WIFI_SSID"] = WIFI_SSID;
-      jsonSettings["WIFI_PASSWORD"] = WIFI_PASSWORD;
-      jsonSettings["BROKER"] = BROKER;
-      jsonSettings["BROKER_LOGIN"] = BROKER_LOGIN;
-      jsonSettings["BROKER_PASS"] = BROKER_PASS;
-
-      if (serializeJson(jsonSettings, f) == 0)
-      {
-        error_msg = "failed to write file";
-      }
-
-      f.close();
-    }
-
-    jsonSettings["WIFI_SSID"] = "";
-    jsonSettings["WIFI_PASSWORD"] = "";
-    jsonSettings["BROKER"] = "";
-    jsonSettings["BROKER_LOGIN"] = "";
-    jsonSettings["BROKER_PASS"] = "";
-
-    if (ip_settings == 0)
-    {
-      ip_settings = 1;
-      // read the settings from filesystem, if empty, put in AP mode
-
-      File file = LittleFS.open("/ip.txt", "r");
-      if (!file)
-      {
-        error_msg = "could not open file for reading";
-      }
-      else
-      {
-        deserializeJson(jsonSettings, file);
-        // Filesystem methods assuming it all went well
-
-        // now I have them - NOTE: PROBABLY NEED TO CHECK THEM!!!!!
-        ip_settings = 2;
-        WIFI_SSID = jsonSettings["WIFI_SSID"].as<String>();
-        WIFI_PASSWORD = jsonSettings["WIFI_PASSWORD"].as<String>();
-        BROKER = jsonSettings["BROKER"].as<String>();
-        BROKER_LOGIN = jsonSettings["BROKER_LOGIN"].as<String>();
-        BROKER_PASS = jsonSettings["BROKER_PASS"].as<String>();
-        error_msg = "Successfully read the configuration";
-      }
-      file.close();
-    }
-  }
-  else
-  {
-    error_msg = "Could not mount fs";
-  }
-
-  LittleFS.end();
 
   // Begin RS485 in listening mode -> no longer required with new RS485 chip
   if (AUTO_TX)
@@ -854,8 +772,6 @@ void setup()
 
   httpUpdater.setup(&httpServer, "admin", "");
   httpServer.begin();
-  MDNS.begin("Spa");
-  MDNS.addService("http", "tcp", 80);
 
   mqtt.setServer(BROKER.c_str(), 1883);
   mqtt.setCallback(callback);
@@ -864,7 +780,7 @@ void setup()
   mqtt.setBufferSize(1024);
   mqtt.connect("Spa1", BROKER_LOGIN.c_str(), BROKER_PASS.c_str());
 
-  mqtt.publish("Spa/node/debug", "MQTT Connected");
+  mqtt.publish("Spa/debug/message", "MQTT Connected");
 
   ArduinoOTA.begin();
 
@@ -873,7 +789,7 @@ void setup()
   pingTimer.start();
   pubsubTimer.start();
   faultlogTimer.start();
-  mqttpubsub();
+  // mqttpubsub();
 }
 
 void loop()
@@ -886,6 +802,8 @@ void loop()
   pubsubTimer.update();
   faultlogTimer.update();
 
+  //  if (have_config == 2) mqttpubsub(); //do mqtt stuff after we're connected and if we have got the config elements
+
   _yield();
 
   // Read from Spa RS485
@@ -893,7 +811,6 @@ void loop()
   {
     x = Serial.read();
     Q_in.push(x);
-    // DEBUG: mqtt.publish("Spa/rcv", String(x).c_str()); _yield();
 
     // Drop until SOF is seen
     if (Q_in.first() != 0x7E)
@@ -959,7 +876,6 @@ void loop()
           Q_out.push(0x00);
           Q_out.push(0x00);
           Q_out.push(0x01);
-          mqtt.publish("Spa/config/status", "Getting config");
           have_config = 1;
           actual_message = true;
         }
@@ -1022,6 +938,7 @@ void loop()
     { // FF AF 13:Status Update - Packet index offset 5
       if (last_state_crc != Q_in[Q_in[1]])
       {
+        // mqtt.publish("Spa/debug/debug", "New State Data");
         lastStatus = millis();
         decodeState();
       }
