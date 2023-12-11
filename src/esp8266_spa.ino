@@ -132,7 +132,7 @@ void _yield()
 
 void decodeFault()
 {
-  mqtt.publish("Spa/debug/message", "Got faults");
+  // mqtt.publish("Spa/debug/message", "Got faults");
   SpaFaultLog.totEntry = Q_in[5];
   SpaFaultLog.currEntry = Q_in[6];
   SpaFaultLog.faultCode = Q_in[7];
@@ -277,7 +277,10 @@ void decodeState()
         d = c; // remove spurious readings greater or less than 20% away from previous read
     }
 
-    mqtt.publish("Spa/temperature/state", String(d, 2).c_str());
+    if(d < 50.0) //Make sure temperature is only sent if it is realistic. Shouldn't ever be over 50 degrees
+    {
+      mqtt.publish("Spa/temperature/state", String(d, 2).c_str());
+    }
     c = d;
   }
   else
@@ -417,7 +420,7 @@ void hardreset()
 void mqttpubsub()
 {
 
-  mqtt.publish("Spa/debug/message", "mqttpubsub refreshed");
+  // mqtt.publish("Spa/debug/message", "mqttpubsub refreshed");
 
   String Payload;
 
