@@ -21,6 +21,7 @@
 #include <ArduinoJson.h>
 #include <Ticker.h>
 #include <config.h>
+#include <LittleFS.h>
 
 #define AUTO_TX false  // if your chip needs to pull D1 high/low set this to false
 #define SAVE_CONN true // save the ip details above to local filesystem
@@ -544,6 +545,7 @@ void monitorStatus()
   if (WiFi.status() != WL_CONNECTED)
   {
     mqtt.publish("Spa/debug/error", "Wifi Failed");
+    setLastRestartReason("Wifi Failed");
     ESP.restart();
     hardreset();
   }
@@ -561,11 +563,19 @@ void monitorStatus()
     mqtt.publish("Spa/debug/error", "No Command Requests Received - Requesting New Client ID");
     id = 0;
   }
-
   // If no commands are received, or MQTT Ping isn't working then restart
   if (timeSinceLastCommandRequest > 1000000 || timeSinceLastMQTTPing > 1000000)
   {
     mqtt.publish("Spa/debug/error", "No Commands Requests Received - Restarting");
+    if(timeSinceLastCommandRequest > 1000000)
+    {
+      setLastRestartReason("No Command Requests Received");
+    }
+    else
+    {
+      setLastRestartReason("MQTT Ping Not Working");
+    }
+
     ESP.restart();
     hardreset();
   }
@@ -643,6 +653,7 @@ void callback(char *p_topic, byte *p_payload, unsigned int p_length)
   {
     if (payload.equals("reset"))
       mqtt.publish("Spa/debug/message", "Resetting Controller From MQTT Command");
+      setLastRestartReason("MQTT Command");
       hardreset();
   }
   else if (topic.equals("Spa/heatingmode/set"))
@@ -711,6 +722,43 @@ void notifyOfUpdateStarted() {
 }
 void notifyOfUpdateEnded() {
   mqtt.publish("Spa/debug/message", "Arduino OTA Update Complete");
+  setLastRestartReason("OTA Update");
+}
+
+void getLastRestartReason() {
+  if (!LittleFS.begin()) {
+    mqtt.publish("Spa/debug/error", "LittleFS Error");
+    return; // Stop if file system can't be initialized
+  }
+
+  File file = LittleFS.open("/restartReason.txt", "r"); // Open the file for reading
+  if (!file) {
+    mqtt.publish("Spa/debug/error", "Failed to open restartReason.txt file for reading");
+  } else {
+    String startReason = file.readStringUntil('\n'); // Read the restart reason
+    mqtt.publish("Spa/debug/restartReason", ("Last Restart Reason = " + startReason).c_str());
+    file.close();
+  }
+
+  LittleFS.end(); // Close the file system
+}
+
+
+void setLastRestartReason(const String& reason) {
+  if (!LittleFS.begin()) {
+    mqtt.publish("Spa/debug/error", "LittleFS Error");
+    return; // Stop if file system can't be initialized
+  }
+
+  File file = LittleFS.open("/restartReason.txt", "w"); // Open the file for writing
+  if (!file) {
+    mqtt.publish("Spa/debug/error", "Failed to open restartReason.txt file for writing");
+  } else {
+    file.print(reason); // Write the new reason
+    file.close();
+  }
+
+  LittleFS.end(); // Close the file system
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -764,6 +812,7 @@ void setup()
   // Reset because of no connection
   if (WiFi.status() != WL_CONNECTED)
   {
+    setLastRestartReason("WIFI Not Connected");
     hardreset();
   }
 
@@ -779,6 +828,10 @@ void setup()
 
   mqtt.publish("Spa/debug/message", "Microcontroller Startup");
   mqtt.publish("Spa/debug/message", "MQTT Connected");
+
+  getLastRestartReason();
+  setLastRestartReason("Unknown (No Info Stored)");
+
 
   ArduinoOTA.begin();
   ArduinoOTA.onStart(notifyOfUpdateStarted);
