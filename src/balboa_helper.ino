@@ -48,7 +48,7 @@ void rs485_send() {
     digitalWrite(TX485_Rx, LOW);
     pinMode(TX485_Tx, OUTPUT);
     digitalWrite(TX485_Tx, HIGH);
-    delay(1);
+    // delay(1);
   }
 
 

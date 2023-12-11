@@ -18,7 +18,6 @@
 // GND  BLACK
 // A    YELLOW
 // B    WHITE
-// #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <Ticker.h>
 #include <config.h>
@@ -130,23 +129,10 @@ void _yield()
   httpServer.handleClient();
 }
 
-void print_msg(CircularBuffer<uint8_t, 35> &data)
-{
-  String s;
-  // for (i = 0; i < (Q_in[1] + 2); i++) {
-  for (i = 0; i < data.size(); i++)
-  {
-    x = Q_in[i];
-    if (x < 0x0A)
-      s += "0";
-    s += String(x, HEX);
-    s += " ";
-  }
-  _yield();
-}
 
 void decodeFault()
 {
+  mqtt.publish("Spa/debug/message", "Got faults");
   SpaFaultLog.totEntry = Q_in[5];
   SpaFaultLog.currEntry = Q_in[6];
   SpaFaultLog.faultCode = Q_in[7];
@@ -272,8 +258,6 @@ void decodeState()
   double d = 0.0;
   double c = 0.0;
 
-  // DEBUG for finding meaning:
-  // print_msg(Q_in);
 
   // 25:Flag Byte 20 - Set Temperature
   d = Q_in[25] / 2;
@@ -499,6 +483,8 @@ void reconnect()
     //   have_config = 2; // we have disconnected, let's republish our configuration
     // }
   }
+  if(mqtt.connected()){
+  mqtt.publish("Spa/debug/error", "MQTT Timeout - Reconnect Successfully Run");}
   mqtt.setBufferSize(1024); // increase pubsubclient buffer size
 }
 
@@ -569,14 +555,14 @@ void monitorStatus()
   // If there isn't a command requestin 10 seconds then reset client id
   if (timeSinceLastCommandRequest > 10000 && id != 0)
   {
-    mqtt.publish("Spa/debug/error", "Requesting New Client ID");
+    mqtt.publish("Spa/debug/error", "No Command Requests Received - Requesting New Client ID");
     id = 0;
   }
 
   // If no commands are received, or MQTT Ping isn't working then restart
   if (timeSinceLastCommandRequest > 1000000 || timeSinceLastMQTTPing > 1000000)
   {
-    mqtt.publish("Spa/debug/error", "No Commands Received");
+    mqtt.publish("Spa/debug/error", "No Commands Requests Received - Restarting");
     ESP.restart();
     hardreset();
   }
@@ -653,6 +639,7 @@ void callback(char *p_topic, byte *p_payload, unsigned int p_length)
   else if (topic.equals("Spa/command"))
   {
     if (payload.equals("reset"))
+      mqtt.publish("Spa/debug/message", "Resetting Controller From MQTT Command");
       hardreset();
   }
   else if (topic.equals("Spa/heatingmode/set"))
@@ -714,6 +701,13 @@ void callback(char *p_topic, byte *p_payload, unsigned int p_length)
     settemp = d;
     send = 0xff;
   }
+}
+
+void notifyOfUpdateStarted() {
+  mqtt.publish("Spa/debug/message", "Arduino OTA Update Start");
+}
+void notifyOfUpdateEnded() {
+  mqtt.publish("Spa/debug/message", "Arduino OTA Update Complete");
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -780,9 +774,12 @@ void setup()
   mqtt.setBufferSize(1024);
   mqtt.connect("Spa1", BROKER_LOGIN.c_str(), BROKER_PASS.c_str());
 
+  mqtt.publish("Spa/debug/message", "Microcontroller Startup");
   mqtt.publish("Spa/debug/message", "MQTT Connected");
 
   ArduinoOTA.begin();
+  ArduinoOTA.onStart(notifyOfUpdateStarted);
+  ArduinoOTA.onEnd(notifyOfUpdateEnded);
 
   commsUpdateTimer.start();
   statusMonitor.start();
@@ -826,13 +823,10 @@ void loop()
   // if (x == 0x7E && Q_in[0] == 0x7E && Q_in[1] != 0x7E) {
   if (x == 0x7E && Q_in.size() > 2)
   {
-    // print_msg();
 
     // Unregistered or yet in progress
     if (id == 0)
     {
-      if (Q_in[2] == 0xFE)
-        print_msg(Q_in);
 
       // FE BF 02:got new client ID
       if (Q_in[2] == 0xFE && Q_in[4] == 0x02)
@@ -911,12 +905,6 @@ void loop()
       }
 
       rs485_send();
-      if (actual_message)
-      {
-        // print_msg(Q_out);
-        send_str = String(send);
-        send_str.toCharArray(send_mqtt, send_str.length() + 1);
-      }
 
       send = 0x00;
     }
@@ -938,16 +926,9 @@ void loop()
     { // FF AF 13:Status Update - Packet index offset 5
       if (last_state_crc != Q_in[Q_in[1]])
       {
-        // mqtt.publish("Spa/debug/debug", "New State Data");
         lastStatus = millis();
         decodeState();
       }
-    }
-    else
-    {
-      // DEBUG for finding meaning
-      // if (Q_in[2] & 0xFE || Q_in[2] == id)
-      // print_msg(Q_in);
     }
 
     // Clean up queue
