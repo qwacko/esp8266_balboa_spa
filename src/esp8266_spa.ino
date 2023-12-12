@@ -19,11 +19,12 @@
 // A    YELLOW
 // B    WHITE
 #include <ArduinoJson.h>
+#include <LittleFS.h>
 #include <Ticker.h>
 #include <config.h>
-#include <LittleFS.h>
 
-#define AUTO_TX false  // if your chip needs to pull D1 high/low set this to false
+#define AUTO_TX                                                                \
+  false // if your chip needs to pull D1 high/low set this to false
 #define SAVE_CONN true // save the ip details above to local filesystem
 
 #define STRON String("ON").c_str()
@@ -36,15 +37,15 @@
 #define loopcountmax 10000
 #define pubsub_refresh_ms 10000 // 10 Seconds
 
-#include <ESP8266WiFi.h>
 #include <CircularBuffer.h>
+#include <ESP8266WiFi.h>
 CircularBuffer<uint8_t, 35> Q_in;
 CircularBuffer<uint8_t, 35> Q_out;
 
 #include <ESP8266WebServer.h> // Local WebServer used to serve the configuration portal
 // #include <ESP8266mDNS.h>
-#include <ESP8266HTTPUpdateServer.h>
 #include <ArduinoOTA.h>
+#include <ESP8266HTTPUpdateServer.h>
 ESP8266WebServer httpServer(80);
 ESP8266HTTPUpdateServer httpUpdater;
 
@@ -77,13 +78,16 @@ String send_str;
 
 // char looptimer_mqtt[50];
 char send_mqtt[50];
-char have_config = 0;      // stages: 0-> want it; 1-> requested it; 2-> got it; 3-> further processed it
-char have_faultlog = 0;    // stages: 0-> want it; 1-> requested it; 2-> got it; 3-> further processed it
-char faultlog_minutes = 0; // temp logic so we only get the fault log once per 5 minutes
-char ip_settings = 0;      // stages: 0-> want it; 1-> requested it; 2-> got it; 3-> further processed it
+char have_config = 0; // stages: 0-> want it; 1-> requested it; 2-> got it; 3->
+                      // further processed it
+char have_faultlog = 0; // stages: 0-> want it; 1-> requested it; 2-> got it;
+                        // 3-> further processed it
+char faultlog_minutes =
+    0; // temp logic so we only get the fault log once per 5 minutes
+char ip_settings = 0; // stages: 0-> want it; 1-> requested it; 2-> got it; 3->
+                      // further processed it
 
-struct
-{
+struct {
   uint8_t jet1 : 1;
   uint8_t jet2 : 1;
   uint8_t blower : 1;
@@ -95,8 +99,7 @@ struct
   uint8_t minutes : 6;
 } SpaState;
 
-struct
-{
+struct {
   uint8_t pump1 : 2; // this could be 1=1 speed; 2=2 speeds
   uint8_t pump2 : 2;
   uint8_t pump3 : 2;
@@ -112,8 +115,7 @@ struct
   uint8_t aux2 : 1;
 } SpaConfig;
 
-struct
-{
+struct {
   uint8_t totEntry : 5;
   uint8_t currEntry : 5;
   uint8_t faultCode : 6;
@@ -123,22 +125,19 @@ struct
   uint8_t minutes : 6;
 } SpaFaultLog;
 
-void _yield()
-{
+void _yield() {
   yield();
   mqtt.loop();
   httpServer.handleClient();
 }
 
-
-void decodeFault()
-{
+void decodeFault() {
   // mqtt.publish("Spa/debug/message", "Got faults");
   SpaFaultLog.totEntry = Q_in[5];
   SpaFaultLog.currEntry = Q_in[6];
   SpaFaultLog.faultCode = Q_in[7];
-  switch (SpaFaultLog.faultCode)
-  { // this is a inelegant way to do it, a lookup table would be better
+  switch (SpaFaultLog.faultCode) { // this is a inelegant way to do it, a lookup
+                                   // table would be better
   case 15:
     SpaFaultLog.faultMessage = "Sensors are out of sync";
     break;
@@ -214,15 +213,11 @@ void decodeFault()
   have_faultlog = 2;
 }
 
-void resetFaultLog()
-{
-  have_faultlog = 0;
-}
+void resetFaultLog() { have_faultlog = 0; }
 
 Ticker faultlogTimer(resetFaultLog, 300000); // 5 minutes
 
-void decodeSettings()
-{
+void decodeSettings() {
   mqtt.publish("Spa/debug/message", "Got config");
   SpaConfig.pump1 = Q_in[5] & 0x03;
   SpaConfig.pump2 = (Q_in[5] & 0x0C) >> 2;
@@ -253,39 +248,37 @@ void decodeSettings()
   have_config = 2;
 }
 
-void decodeState()
-{
+void decodeState() {
   String s;
   double d = 0.0;
   double c = 0.0;
-
 
   // 25:Flag Byte 20 - Set Temperature
   d = Q_in[25] / 2;
   if (Q_in[25] % 2 == 1)
     d += 0.5;
-  mqtt.publish("Spa/target_temp/state", String(d, 2).c_str());
+  if (d > 10.0 && d < 50.0) {
+    mqtt.publish("Spa/target_temp/state", String(d, 2).c_str());
+  }
 
   // 7:Flag Byte 2 - Actual temperature
-  if (Q_in[7] != 0xFF)
-  {
+  if (Q_in[7] != 0xFF) {
     d = Q_in[7] / 2;
     if (Q_in[7] % 2 == 1)
       d += 0.5;
-    if (c > 0)
-    {
+    if (c > 0) {
       if ((d > c * 1.2) || (d < c * 0.8))
-        d = c; // remove spurious readings greater or less than 20% away from previous read
+        d = c; // remove spurious readings greater or less than 20% away from
+               // previous read
     }
 
-    if(d < 50.0) //Make sure temperature is only sent if it is realistic. Shouldn't ever be over 50 degrees
+    if (d < 50.0 && d > 5.0) // Make sure temperature is only sent if it is
+                             // realistic. Shouldn't ever be over 50 degrees
     {
       mqtt.publish("Spa/temperature/state", String(d, 2).c_str());
     }
     c = d;
-  }
-  else
-  {
+  } else {
     d = 0;
   }
   // REMARK Move upper publish to HERE to get 0 for unknown temperature
@@ -304,8 +297,7 @@ void decodeState()
   mqtt.publish("Spa/time/state", s.c_str());
 
   // 10:Flag Byte 5 - Heating Mode
-  switch (Q_in[10])
-  {
+  switch (Q_in[10]) {
   case 0:
     mqtt.publish("Spa/heatingmode/state", STRON); // Ready
     mqtt.publish("Spa/heat_mode/state", "heat");  // Ready
@@ -329,36 +321,27 @@ void decodeState()
     mqtt.publish("Spa/heatstate/state", STRON);
 
   d = bitRead(Q_in[15], 2);
-  if (d == 0)
-  {
+  if (d == 0) {
     mqtt.publish("Spa/highrange/state", STROFF); // LOW
     SpaState.highrange = 0;
-  }
-  else if (d == 1)
-  {
+  } else if (d == 1) {
     mqtt.publish("Spa/highrange/state", STRON); // HIGH
     SpaState.highrange = 1;
   }
 
   // 16:Flags Byte 11
-  if (bitRead(Q_in[16], 1) == 1)
-  {
+  if (bitRead(Q_in[16], 1) == 1) {
     mqtt.publish("Spa/jet_1/state", STRON);
     SpaState.jet1 = 1;
-  }
-  else
-  {
+  } else {
     mqtt.publish("Spa/jet_1/state", STROFF);
     SpaState.jet1 = 0;
   }
 
-  if (bitRead(Q_in[16], 3) == 1)
-  {
+  if (bitRead(Q_in[16], 3) == 1) {
     mqtt.publish("Spa/jet_2/state", STRON);
     SpaState.jet2 = 1;
-  }
-  else
-  {
+  } else {
     mqtt.publish("Spa/jet_2/state", STROFF);
     SpaState.jet2 = 0;
   }
@@ -369,24 +352,18 @@ void decodeState()
   else
     mqtt.publish("Spa/circ/state", STROFF);
 
-  if (bitRead(Q_in[18], 2) == 1)
-  {
+  if (bitRead(Q_in[18], 2) == 1) {
     mqtt.publish("Spa/blower/state", STRON);
     SpaState.blower = 1;
-  }
-  else
-  {
+  } else {
     mqtt.publish("Spa/blower/state", STROFF);
     SpaState.blower = 0;
   }
   // 19:Flags Byte 14
-  if (Q_in[19] == 0x03)
-  {
+  if (Q_in[19] == 0x03) {
     mqtt.publish("Spa/light/state", STRON);
     SpaState.light = 1;
-  }
-  else
-  {
+  } else {
     mqtt.publish("Spa/light/state", STROFF);
     SpaState.light = 0;
   }
@@ -407,19 +384,16 @@ void decodeState()
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void hardreset()
-{
+void hardreset() {
   ESP.wdtDisable();
-  while (1)
-  {
+  while (1) {
   };
 }
 
 /// Resets MQTT Connection information and makes sure everything issubcribed to
 //////////////////////////////////////////////////////////////////////////////////
 
-void mqttpubsub()
-{
+void mqttpubsub() {
 
   // mqtt.publish("Spa/debug/message", "mqttpubsub refreshed");
 
@@ -463,32 +437,30 @@ void mqttpubsub()
 
 Ticker pubsubTimer(mqttpubsub, pubsub_refresh_ms);
 
-void reconnect()
-{
+void reconnect() {
 
   // mqtt.disconnect();
 
-  if (!mqtt.connected())
-  {
+  if (!mqtt.connected()) {
     // Attempt to connect
-    if (BROKER_PASS == "")
-    {
+    if (BROKER_PASS == "") {
       // connection =
       mqtt.connect(String(String("Spa") + String(millis())).c_str());
-    }
-    else
-    {
+    } else {
       // connection =
       mqtt.connect("Spa1", BROKER_LOGIN.c_str(), BROKER_PASS.c_str());
     }
 
     // if (have_config == 3)
     // {
-    //   have_config = 2; // we have disconnected, let's republish our configuration
+    //   have_config = 2; // we have disconnected, let's republish our
+    //   configuration
     // }
   }
-  if(mqtt.connected()){
-  mqtt.publish("Spa/debug/error", "MQTT Timeout - Reconnect Successfully Run");}
+  if (mqtt.connected()) {
+    mqtt.publish("Spa/debug/error",
+                 "MQTT Timeout - Reconnect Successfully Run");
+  }
   mqtt.setBufferSize(1024); // increase pubsubclient buffer size
 }
 
@@ -497,14 +469,12 @@ void reconnect()
 
 unsigned long lastMQTTPing = millis();
 
-void ping()
-{
-  mqtt.publish("Spa/heartbeat/ping", "ping");
-}
+void ping() { mqtt.publish("Spa/heartbeat/ping", "ping"); }
 
 Ticker pingTimer(ping, 1000);
 
-/// Monitor Status Of Data From SPA //////////////////////////////////////////////////
+/// Monitor Status Of Data From SPA
+/// //////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////
 
 unsigned long loopCount = 0;
@@ -513,19 +483,16 @@ unsigned long lastStatus = millis();
 unsigned long lastCommandRequest = millis();
 unsigned long startupTime = millis() / 1000;
 
-void monitorStatus()
-{
+void monitorStatus() {
 
   unsigned long loopTimerDifference = millis() - loopTimer;
 
-  if (loopCount > 0)
-  {
-    float loopTime = static_cast<float>(loopTimerDifference) / static_cast<float>(loopCount);
+  if (loopCount > 0) {
+    float loopTime =
+        static_cast<float>(loopTimerDifference) / static_cast<float>(loopCount);
 
     mqtt.publish("Spa/debug/loopTime", String(loopTime).c_str());
-  }
-  else
-  {
+  } else {
     mqtt.publish("Spa/debug/loopTime", "0");
   }
   unsigned long timeSinceLastStatus = millis() - lastStatus;
@@ -533,46 +500,47 @@ void monitorStatus()
   unsigned long timeSinceLastMQTTPing = millis() - lastMQTTPing;
   unsigned long uptime = (millis() / 1000) - startupTime;
 
-  mqtt.publish("Spa/debug/loopTimerDifference", String(loopTimerDifference).c_str());
+  mqtt.publish("Spa/debug/loopTimerDifference",
+               String(loopTimerDifference).c_str());
   mqtt.publish("Spa/debug/loopCount", String(loopCount).c_str());
-  mqtt.publish("Spa/debug/timeSinceLastStatus", String(timeSinceLastStatus).c_str());
-  mqtt.publish("Spa/debug/timeSinceLastCommandRequest", String(timeSinceLastCommandRequest).c_str());
-  mqtt.publish("Spa/debug/timeSinceLastMQTTPing", String(timeSinceLastMQTTPing).c_str());
+  mqtt.publish("Spa/debug/timeSinceLastStatus",
+               String(timeSinceLastStatus).c_str());
+  mqtt.publish("Spa/debug/timeSinceLastCommandRequest",
+               String(timeSinceLastCommandRequest).c_str());
+  mqtt.publish("Spa/debug/timeSinceLastMQTTPing",
+               String(timeSinceLastMQTTPing).c_str());
   mqtt.publish("Spa/debug/uptime", String(uptime).c_str());
   mqtt.publish("Spa/node/id", String(id).c_str());
 
   // If WIFI isn't connected, then restart
-  if (WiFi.status() != WL_CONNECTED)
-  {
+  if (WiFi.status() != WL_CONNECTED) {
     mqtt.publish("Spa/debug/error", "Wifi Failed");
     setLastRestartReason("Wifi Failed");
     ESP.restart();
     hardreset();
   }
 
-  // If MQTT isn't connected or we haven't received a ping in 10 seconds, then restart mqtt
-  if (!mqtt.connected() || timeSinceLastMQTTPing > 100000)
-  {
+  // If MQTT isn't connected or we haven't received a ping in 10 seconds, then
+  // restart mqtt
+  if (!mqtt.connected() || timeSinceLastMQTTPing > 100000) {
     mqtt.publish("Spa/debug/error", "MQTT Disconnected");
     reconnect();
   }
 
   // If there isn't a command requestin 10 seconds then reset client id
-  if (timeSinceLastCommandRequest > 10000 && id != 0)
-  {
-    mqtt.publish("Spa/debug/error", "No Command Requests Received - Requesting New Client ID");
+  if (timeSinceLastCommandRequest > 10000 && id != 0) {
+    mqtt.publish("Spa/debug/error",
+                 "No Command Requests Received - Requesting New Client ID");
     id = 0;
   }
   // If no commands are received, or MQTT Ping isn't working then restart
-  if (timeSinceLastCommandRequest > 1000000 || timeSinceLastMQTTPing > 1000000)
-  {
-    mqtt.publish("Spa/debug/error", "No Commands Requests Received - Restarting");
-    if(timeSinceLastCommandRequest > 1000000)
-    {
+  if (timeSinceLastCommandRequest > 1000000 ||
+      timeSinceLastMQTTPing > 1000000) {
+    mqtt.publish("Spa/debug/error",
+                 "No Commands Requests Received - Restarting");
+    if (timeSinceLastCommandRequest > 1000000) {
       setLastRestartReason("No Command Requests Received");
-    }
-    else
-    {
+    } else {
       setLastRestartReason("MQTT Ping Not Working");
     }
 
@@ -587,26 +555,24 @@ void monitorStatus()
 
 Ticker statusMonitor(monitorStatus, 1000);
 
-/// SEND COMMS CONFIGURATION REGULARLY////////////////////////////////////////////////
+/// SEND COMMS CONFIGURATION
+/// REGULARLY////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////
-void sendCommsConfiguration()
-{
+void sendCommsConfiguration() {
   mqtt.publish("Spa/debug/network/wifiSSID", WIFI_SSID.c_str());
-  mqtt.publish("Spa/debug/network/ipAddress", WiFi.localIP().toString().c_str());
+  mqtt.publish("Spa/debug/network/ipAddress",
+               WiFi.localIP().toString().c_str());
   mqtt.publish("Spa/debug/network/wifiStrength", String(WiFi.RSSI()).c_str());
 }
 
 Ticker commsUpdateTimer(sendCommsConfiguration, 1000);
 
 // function called when a MQTT message arrived
-void callback(char *p_topic, byte *p_payload, unsigned int p_length)
-{
-
+void callback(char *p_topic, byte *p_payload, unsigned int p_length) {
 
   // concat the payload into a string
   String payload;
-  for (uint8_t i = 0; i < p_length; i++)
-  {
+  for (uint8_t i = 0; i < p_length; i++) {
     payload.concat((char)p_payload[i]);
   }
   String topic = String(p_topic);
@@ -616,17 +582,13 @@ void callback(char *p_topic, byte *p_payload, unsigned int p_length)
   // mqtt.publish("Spa/debug/debug", payload.c_str());
   // mqtt.publish("Spa/debug/debug", "Procesing Follows...");
 
-
   _yield();
 
   // handle message topic
-  if (topic.equals("Spa/heartbeat/ping"))
-  {
+  if (topic.equals("Spa/heartbeat/ping")) {
     // mqtt.publish("Spa/heartbeat/pong", "pong");
     lastMQTTPing = millis();
-  }
-  else if (topic.startsWith("Spa/relay_"))
-  {
+  } else if (topic.startsWith("Spa/relay_")) {
     bool newstate = 0;
 
     if (payload.equals("ON"))
@@ -634,80 +596,60 @@ void callback(char *p_topic, byte *p_payload, unsigned int p_length)
     else if (payload.equals("OFF"))
       newstate = HIGH;
 
-    if (topic.charAt(10) == '1')
-    {
+    if (topic.charAt(10) == '1') {
       pinMode(RLY1, INPUT);
       delay(25);
       pinMode(RLY1, OUTPUT);
       digitalWrite(RLY1, newstate);
-    }
-    else if (topic.charAt(10) == '2')
-    {
+    } else if (topic.charAt(10) == '2') {
       pinMode(RLY2, INPUT);
       delay(25);
       pinMode(RLY2, OUTPUT);
       digitalWrite(RLY2, newstate);
     }
-  }
-  else if (topic.equals("Spa/command"))
-  {
+  } else if (topic.equals("Spa/command")) {
     if (payload.equals("reset"))
-      mqtt.publish("Spa/debug/message", "Resetting Controller From MQTT Command");
-      setLastRestartReason("MQTT Command");
-      hardreset();
-  }
-  else if (topic.equals("Spa/heatingmode/set"))
-  {
+      mqtt.publish("Spa/debug/message",
+                   "Resetting Controller From MQTT Command");
+    setLastRestartReason("MQTT Command");
+    hardreset();
+  } else if (topic.equals("Spa/heatingmode/set")) {
     if (payload.equals("ON") && SpaState.restmode == 1)
       send = 0x51; // ON = Ready; OFF = Rest
     else if (payload.equals("OFF") && SpaState.restmode == 0)
       send = 0x51;
-  }
-  else if (topic.equals("Spa/heat_mode/set"))
-  {
+  } else if (topic.equals("Spa/heat_mode/set")) {
     if (payload.equals("heat") && SpaState.restmode == 1)
       send = 0x51; // ON = Ready; OFF = Rest
     else if (payload.equals("off") && SpaState.restmode == 0)
       send = 0x51;
-  }
-  else if (topic.equals("Spa/light/set"))
-  {
-    
+  } else if (topic.equals("Spa/light/set")) {
+
     if (payload.equals("ON") && SpaState.light == 0)
       send = 0x11;
     else if (payload.equals("OFF") && SpaState.light == 1)
       send = 0x11;
-  }
-  else if (topic.equals("Spa/jet_1/set"))
-  {
+  } else if (topic.equals("Spa/jet_1/set")) {
     if (payload.equals("ON") && SpaState.jet1 == 0)
       send = 0x04;
     else if (payload.equals("OFF") && SpaState.jet1 == 1)
       send = 0x04;
-  }
-  else if (topic.equals("Spa/jet_2/set"))
-  {
+  } else if (topic.equals("Spa/jet_2/set")) {
     if (payload.equals("ON") && SpaState.jet2 == 0)
       send = 0x05;
     else if (payload.equals("OFF") && SpaState.jet2 == 1)
       send = 0x05;
-  }
-  else if (topic.equals("Spa/blower/set"))
-  {
+  } else if (topic.equals("Spa/blower/set")) {
     if (payload.equals("ON") && SpaState.blower == 0)
       send = 0x0C;
     else if (payload.equals("OFF") && SpaState.blower == 1)
       send = 0x0C;
-  }
-  else if (topic.equals("Spa/highrange/set"))
-  {
+  } else if (topic.equals("Spa/highrange/set")) {
     if (payload.equals("ON") && SpaState.highrange == 0)
       send = 0x50; // ON = High, OFF = Low
     else if (payload.equals("OFF") && SpaState.highrange == 1)
       send = 0x50;
-  }
-  else if (topic.equals("Spa/target_temp/set"))
-  {
+  } else if (topic.equals("Spa/target_temp/set")) {
     // Get new set temperature
     double d = payload.toDouble();
     if (d > 0)
@@ -731,28 +673,32 @@ void getLastRestartReason() {
     return; // Stop if file system can't be initialized
   }
 
-  File file = LittleFS.open("/restartReason.txt", "r"); // Open the file for reading
+  File file =
+      LittleFS.open("/restartReason.txt", "r"); // Open the file for reading
   if (!file) {
-    mqtt.publish("Spa/debug/error", "Failed to open restartReason.txt file for reading");
+    mqtt.publish("Spa/debug/error",
+                 "Failed to open restartReason.txt file for reading");
   } else {
     String startReason = file.readStringUntil('\n'); // Read the restart reason
-    mqtt.publish("Spa/debug/restartReason", ("Last Restart Reason = " + startReason).c_str());
+    mqtt.publish("Spa/debug/restartReason",
+                 ("Last Restart Reason = " + startReason).c_str());
     file.close();
   }
 
   LittleFS.end(); // Close the file system
 }
 
-
-void setLastRestartReason(const String& reason) {
+void setLastRestartReason(const String &reason) {
   if (!LittleFS.begin()) {
     mqtt.publish("Spa/debug/error", "LittleFS Error");
     return; // Stop if file system can't be initialized
   }
 
-  File file = LittleFS.open("/restartReason.txt", "w"); // Open the file for writing
+  File file =
+      LittleFS.open("/restartReason.txt", "w"); // Open the file for writing
   if (!file) {
-    mqtt.publish("Spa/debug/error", "Failed to open restartReason.txt file for writing");
+    mqtt.publish("Spa/debug/error",
+                 "Failed to open restartReason.txt file for writing");
   } else {
     file.print(reason); // Write the new reason
     file.close();
@@ -763,17 +709,13 @@ void setLastRestartReason(const String& reason) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void setup()
-{
+void setup() {
 
   String error_msg = "";
 
   // Begin RS485 in listening mode -> no longer required with new RS485 chip
-  if (AUTO_TX)
-  {
-  }
-  else
-  {
+  if (AUTO_TX) {
+  } else {
     pinMode(TX485_Rx, OUTPUT);
     digitalWrite(TX485_Rx, LOW);
     pinMode(TX485_Tx, OUTPUT);
@@ -791,8 +733,7 @@ void setup()
   Serial.begin(115200);
 
   // give Spa time to wake up after POST
-  for (uint8_t i = 0; i < 5; i++)
-  {
+  for (uint8_t i = 0; i < 5; i++) {
     delay(1000);
     yield();
   }
@@ -804,15 +745,13 @@ void setup()
   WiFi.begin(WIFI_SSID.c_str(), WIFI_PASSWORD.c_str());
   unsigned long timeout = millis() + 10000;
 
-  while (WiFi.status() != WL_CONNECTED && millis() < timeout)
-  {
+  while (WiFi.status() != WL_CONNECTED && millis() < timeout) {
     yield();
   }
 
   // Reset because of no connection
-  if (WiFi.status() != WL_CONNECTED)
-  {
-    setLastRestartReason("WIFI Not Connected");
+  if (WiFi.status() != WL_CONNECTED) {
+    setLastRestartReason("WIFI Not Connected during startup");
     hardreset();
   }
 
@@ -826,12 +765,17 @@ void setup()
   mqtt.setBufferSize(1024);
   mqtt.connect("Spa1", BROKER_LOGIN.c_str(), BROKER_PASS.c_str());
 
+  // Restart Microcontroller if MQTT hasn't connected.
+  if (!mqtt.connected()) {
+    setLastRestartReason("MQTT Not Connected During Startup");
+    hardreset();
+  }
+
   mqtt.publish("Spa/debug/message", "Microcontroller Startup");
   mqtt.publish("Spa/debug/message", "MQTT Connected");
 
   getLastRestartReason();
   setLastRestartReason("Unknown (No Info Stored)");
-
 
   ArduinoOTA.begin();
   ArduinoOTA.onStart(notifyOfUpdateStarted);
@@ -845,8 +789,7 @@ void setup()
   // mqttpubsub();
 }
 
-void loop()
-{
+void loop() {
   loopCount = loopCount + 1;
   ArduinoOTA.handle();
   commsUpdateTimer.update();
@@ -855,13 +798,13 @@ void loop()
   pubsubTimer.update();
   faultlogTimer.update();
 
-  //  if (have_config == 2) mqttpubsub(); //do mqtt stuff after we're connected and if we have got the config elements
+  //  if (have_config == 2) mqttpubsub(); //do mqtt stuff after we're connected
+  //  and if we have got the config elements
 
   _yield();
 
   // Read from Spa RS485
-  if (Serial.available())
-  {
+  if (Serial.available()) {
     x = Serial.read();
     Q_in.push(x);
 
@@ -877,16 +820,13 @@ void loop()
 
   // Complete package
   // if (x == 0x7E && Q_in[0] == 0x7E && Q_in[1] != 0x7E) {
-  if (x == 0x7E && Q_in.size() > 2)
-  {
+  if (x == 0x7E && Q_in.size() > 2) {
 
     // Unregistered or yet in progress
-    if (id == 0)
-    {
+    if (id == 0) {
 
       // FE BF 02:got new client ID
-      if (Q_in[2] == 0xFE && Q_in[4] == 0x02)
-      {
+      if (Q_in[2] == 0xFE && Q_in[4] == 0x02) {
         id = Q_in[5];
         if (id > 0x2F)
           id = 0x2F;
@@ -895,31 +835,25 @@ void loop()
       }
 
       // FE BF 00:Any new clients?
-      if (Q_in[2] == 0xFE && Q_in[4] == 0x00)
-      {
+      if (Q_in[2] == 0xFE && Q_in[4] == 0x00) {
         ID_request();
       }
-    }
-    else if (Q_in[2] == id && Q_in[4] == 0x06)
-    { // we have an ID, do clever stuff
+    } else if (Q_in[2] == id &&
+               Q_in[4] == 0x06) { // we have an ID, do clever stuff
       // id BF 06:Ready to Send
 
       lastCommandRequest = millis();
       actual_message = false;
 
-      if (send == 0xff)
-      {
+      if (send == 0xff) {
         // 0xff marks dirty temperature for now
         Q_out.push(id);
         Q_out.push(0xBF);
         Q_out.push(0x20);
         Q_out.push(settemp);
         actual_message = true;
-      }
-      else if (send == 0x00)
-      {
-        if (have_config == 0)
-        { // Get configuration of the hot tub
+      } else if (send == 0x00) {
+        if (have_config == 0) { // Get configuration of the hot tub
           Q_out.push(id);
           Q_out.push(0xBF);
           Q_out.push(0x22);
@@ -928,9 +862,7 @@ void loop()
           Q_out.push(0x01);
           have_config = 1;
           actual_message = true;
-        }
-        else if (have_faultlog == 0)
-        { // Get the fault log
+        } else if (have_faultlog == 0) { // Get the fault log
           Q_out.push(id);
           Q_out.push(0xBF);
           Q_out.push(0x22);
@@ -939,18 +871,15 @@ void loop()
           Q_out.push(0x00);
           have_faultlog = 1;
           actual_message = true;
-        }
-        else
-        {
-          // A Nothing to Send message is sent by a client immediately after a Clear to Send message if the client has no messages to send.
+        } else {
+          // A Nothing to Send message is sent by a client immediately after a
+          // Clear to Send message if the client has no messages to send.
           Q_out.push(id);
           Q_out.push(0xBF);
           Q_out.push(0x07);
           // actual_message = true;
         }
-      }
-      else
-      {
+      } else {
         // Send toggle commands
         Q_out.push(id);
         Q_out.push(0xBF);
@@ -963,25 +892,18 @@ void loop()
       rs485_send();
 
       send = 0x00;
-    }
-    else if (Q_in[2] == id && Q_in[4] == 0x2E)
-    {
-      if (last_state_crc != Q_in[Q_in[1]])
-      {
+    } else if (Q_in[2] == id && Q_in[4] == 0x2E) {
+      if (last_state_crc != Q_in[Q_in[1]]) {
         decodeSettings();
       }
-    }
-    else if (Q_in[2] == id && Q_in[4] == 0x28)
-    {
-      if (last_state_crc != Q_in[Q_in[1]])
-      {
+    } else if (Q_in[2] == id && Q_in[4] == 0x28) {
+      if (last_state_crc != Q_in[Q_in[1]]) {
         decodeFault();
       }
-    }
-    else if (Q_in[2] == 0xFF && Q_in[4] == 0x13)
-    { // FF AF 13:Status Update - Packet index offset 5
-      if (last_state_crc != Q_in[Q_in[1]])
-      {
+    } else if (Q_in[2] == 0xFF &&
+               Q_in[4] ==
+                   0x13) { // FF AF 13:Status Update - Packet index offset 5
+      if (last_state_crc != Q_in[Q_in[1]]) {
         lastStatus = millis();
         decodeState();
       }
