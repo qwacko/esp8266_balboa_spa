@@ -567,18 +567,17 @@ void sendCommsConfiguration() {
 
 Ticker commsUpdateTimer(sendCommsConfiguration, 1000);
 
-
-
 double delayedSetTemp = -1.0; // Store the temperature setpoint
 
-void applyTemperatureSetpoint(){
-  if(delayedSetTemp > 0){
+void applyTemperatureSetpoint() {
+  if (delayedSetTemp > 0) {
     settemp = delayedSetTemp;
     send = 0xff;
   }
 }
 
-Ticker setTempTicker(applyTemperatureSetpoint, 500, 1);        // Ticker for delayed temperature setting
+Ticker setTempTicker(applyTemperatureSetpoint, 500,
+                     1); // Ticker for delayed temperature setting
 
 // function called when a MQTT message arrived
 void callback(char *p_topic, byte *p_payload, unsigned int p_length) {
@@ -668,8 +667,7 @@ void callback(char *p_topic, byte *p_payload, unsigned int p_length) {
     if (d > 0)
       d *= 2; // Convert to internal representation
     delayedSetTemp = d;
-    //Delay temperature setpoint to allow for receipt of heating mode commands
-    // setTempTicker = Ticker(applyTemperatureSetpoint, 500, 1);
+    // Delay temperature setpoint to allow for receipt of heating mode commands
     setTempTicker.interval(500);
   }
 }
