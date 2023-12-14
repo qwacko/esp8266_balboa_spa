@@ -567,6 +567,19 @@ void sendCommsConfiguration() {
 
 Ticker commsUpdateTimer(sendCommsConfiguration, 1000);
 
+
+
+double delayedSetTemp = -1.0; // Store the temperature setpoint
+
+void applyTemperatureSetpoint(){
+  if(delayedSetTemp > 0){
+    settemp = delayedSetTemp;
+    send = 0xff;
+  }
+}
+
+Ticker setTempTicker(applyTemperatureSetpoint, 500);        // Ticker for delayed temperature setting
+
 // function called when a MQTT message arrived
 void callback(char *p_topic, byte *p_payload, unsigned int p_length) {
 
@@ -654,8 +667,9 @@ void callback(char *p_topic, byte *p_payload, unsigned int p_length) {
     double d = payload.toDouble();
     if (d > 0)
       d *= 2; // Convert to internal representation
-    settemp = d;
-    send = 0xff;
+    delayedSetTemp = d;
+    //Delay temperature setpoint to allow for receipt of heating mode commands
+    // setTempTicker = Ticker(applyTemperatureSetpoint, 500, 1);
   }
 }
 
@@ -786,6 +800,7 @@ void setup() {
   pingTimer.start();
   pubsubTimer.start();
   faultlogTimer.start();
+  setTempTicker.start();
   // mqttpubsub();
 }
 
@@ -797,6 +812,7 @@ void loop() {
   pingTimer.update();
   pubsubTimer.update();
   faultlogTimer.update();
+  setTempTicker.update();
 
   //  if (have_config == 2) mqttpubsub(); //do mqtt stuff after we're connected
   //  and if we have got the config elements
